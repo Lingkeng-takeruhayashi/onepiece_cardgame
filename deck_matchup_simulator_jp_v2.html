@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Deck Match-up Simulator</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+:root{
+ --primary:#1a73e8;
+ --surface:#ffffff;
+ --surface-alt:#f1f3f4;
+ --border:#e0e0e0;
+ --success:#0b8043;
+ --danger:#d93025;
+}
+*{box-sizing:border-box;margin:0;padding:0;font-family:Roboto,sans-serif;}
+body{background:var(--surface-alt);color:#202124;}
+.wrapper{max-width:1200px;margin:auto;padding:24px;}
+h1{font-size:1.6rem;font-weight:500;margin-bottom:20px;}
+h2{font-size:1.1rem;font-weight:500;margin-bottom:10px;}
+.card{background:var(--surface);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.12);padding:18px;margin-bottom:26px;}
+table{border-collapse:collapse;width:100%;font-size:.88rem;}
+th,td{border:1px solid var(--border);padding:6px 8px;text-align:center;}
+th{background:var(--surface-alt);white-space:nowrap;}
+input[type="number"],input[type="text"],select{border:none;background:#f8f9fa;padding:6px;border-radius:4px;width:100%;text-align:center;}
+input[type="number"]::-webkit-inner-spin-button,input[type="number"]::-webkit-outer-spin-button{appearance:none;margin:0;}
+button{background:var(--primary);color:#fff;border:none;border-radius:4px;padding:8px 16px;cursor:pointer;font-weight:500;}
+button:hover{filter:brightness(1.05);}
+.flex{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+.warn{background:#fce8e6;}
+.delete-btn{background:none;border:none;color:var(--danger);font-size:1rem;cursor:pointer;}
+.score-good{color:var(--success);font-weight:500;}
+.score-bad{color:var(--danger);font-weight:500;}
+details summary{cursor:pointer;font-weight:500;}
+</style>
+</head>
+<body>
+<div class="wrapper">
+<h1>Deck Match-up Simulator</h1>
+
+<!-- Controls -->
+<div class="card flex">
+<label>Mode
+  <select id="mode-select">
+    <option value="1">1-on-1</option>
+    <option value="3">3-on-3</option>
+  </select>
+</label>
+<label>Rounds <input id="rounds" type="number" value="5" min="1" style="width:4rem"></label>
+<button id="simulate">Simulate</button>
+<button id="add-deck">＋ Add Deck</button>
+</div>
+
+<!-- Deck table -->
+<div class="card">
+<h2>Deck & Initial Share</h2>
+<table id="deck-table">
+  <thead><tr><th>#</th><th>Deck Name</th><th>Initial %</th><th></th></tr></thead>
+  <tbody></tbody>
+</table>
+</div>
+
+<!-- Matrix -->
+<div class="card">
+<h2>Match-up Matrix</h2>
+<div style="overflow:auto;">
+<table id="matrix-table"></table>
+</div>
+</div>
+
+<!-- Results -->
+<div class="card" id="results"></div>
+</div>
+
+<datalist id="preset-names"></datalist>
+
+<script>
+/*********** constants ***********/
+const PRESETS=["青紫ルフィ","緑紫ルフィ","紫ルフィ","黒0ルッチ","黒ティーチ","赤黄ベティ","赤ゾロ","赤シャンクス","赤緑スモーカー","緑ボニー","緑黄ロー","青黄ナミ","黄エネル"];
+const LABELS={fav:"有利",sFav:"微有利",even:"五分",sUnfav:"微不利",unfav:"不利"};
+const REVERSE={fav:"unfav",sFav:"sUnfav",even:"even",sUnfav:"sFav",unfav:"fav"}; // internal keys
+const MAP1={fav:0.6,sFav:0.55,even:0.5,sUnfav:0.45,unfav:0.4};
+const MAP3={fav:0.6,sFav:0.55,even:0.5,sUnfav:0.4,unfav:0.3};
+const SCORE={fav:20,sFav:10,even:0,sUnfav:-10,unfav:-20};
+
+/*********** DOM refs ***********/
+const deckBody=document.querySelector('#deck-table tbody');
+const matrixTbl=document.getElementById('matrix-table');
+const modeSel=document.getElementById('mode-select');
+
+/*********** deck helpers ***********/
+function createRow(name="Deck",share=0){
+ const idx=deckBody.rows.length+1;
+ deckBody.insertAdjacentHTML('beforeend',
+  `<tr><td>${idx}</td>
+   <td><input type="text" value="${name}" list="preset-names" class="name-input"></td>
+   <td><input type="number" value="${share}" class="share-input" min="0"></td>
+   <td><button class="delete-btn">✖</button></td></tr>`);
+}
+function ensureOthers(){
+ let last=deckBody.lastElementChild;
+ if(!last||!last.dataset.other){
+   createRow("Others",0);
+   last=deckBody.lastElementChild;
+   last.dataset.other="1";
+   last.querySelector('.name-input').disabled=true;
+   last.querySelector('.share-input').id="other-share";
+   last.querySelector('.share-input').disabled=true;
+   last.querySelector('.delete-btn').remove();
+ }
+ renumber();limitShares();updateOthers();buildMatrix();
+}
+function renumber(){[...deckBody.rows].forEach((r,i)=>r.cells[0].textContent=i+1);}
+function limitShares(){
+ const max=modeSel.value==="3"?33.3:100;
+ deckBody.querySelectorAll('.share-input').forEach(i=>i.max=max);
+}
+function updateOthers(){
+ const sum=[...deckBody.rows].reduce((a,r)=>a+ +(r.dataset.other?"0":r.querySelector('.share-input').value||0),0);
+ const oth=document.getElementById('other-share');if(oth){oth.value=(100-sum).toFixed(1);oth.parentElement.classList.toggle('warn',sum>100);}
+}
+
+/*********** matrix ***********/
+let cats=[]; // category matrix keys
+function buildMatrix(){
+ const n=deckBody.rows.length;
+ cats=Array.from({length:n},()=>Array(n).fill("even"));
+ matrixTbl.innerHTML='';
+ const names=[...deckBody.rows].map(r=>r.cells[1].firstElementChild.value);
+ // header
+ matrixTbl.insertAdjacentHTML('beforeend','<tr><th></th>'+names.map(n=>`<th>${n}</th>`).join('')+'</tr>');
+ // rows
+ for(let i=0;i<n;i++){
+   let row=`<tr><th>${names[i]}</th>`;
+   for(let j=0;j<n;j++){
+     if(i===j){row+='<td>—</td>';continue;}
+     if(j<i){row+=`<td class="mirror" data-i="${i}" data-j="${j}">${LABELS[cats[i][j]]}</td>`;}
+     else{
+       const disabled=(deckBody.rows[i].dataset.other||deckBody.rows[j].dataset.other)?'disabled':'';
+       row+=`<td><select data-i="${i}" data-j="${j}" ${disabled}>${Object.keys(LABELS).map(k=>`<option value="${k}">${LABELS[k]}</option>`).join('')}</select></td>`;
+     }
+   }
+   row+='</tr>';matrixTbl.insertAdjacentHTML('beforeend',row);
+ }
+ matrixTbl.querySelectorAll('select').forEach(sel=>{sel.value="even";sel.onchange=selChange;});
+}
+function selChange(e){
+ const sel=e.target;const i=+sel.dataset.i,j=+sel.dataset.j,cat=sel.value,rev=REVERSE[cat];
+ cats[i][j]=cat;cats[j][i]=rev;
+ const mir=matrixTbl.querySelector(`td.mirror[data-i='${j}'][data-j='${i}']`);
+ if(mir) mir.textContent=LABELS[rev];
+}
+
+/*********** simulation ***********/
+function prob(cat){return (modeSel.value==="3"?MAP3:MAP1)[cat];}
+function getProbs(){
+ const n=deckBody.rows.length;
+ const m=Array.from({length:n},()=>Array(n).fill(0.5));
+ for(let i=0;i<n;i++)for(let j=0;j<n;j++)if(i!==j)m[i][j]=prob(cats[i][j]);
+ return m;
+}
+function once(sh,m){
+ const n=sh.length,nxt=Array(n).fill(0);
+ for(let i=0;i<n;i++){let e=0;for(let j=0;j<n;j++)e+=sh[j]*m[i][j];nxt[i]=sh[i]*e*n;}
+ const tot=nxt.reduce((a,b)=>a+b,0);return nxt.map(x=>x/tot);
+}
+function simulate(){
+ updateOthers();
+ const rounds=+document.getElementById('rounds').value;
+ const decks=[...deckBody.rows].map(r=>({name:r.cells[1].firstElementChild.value,isOther:!!r.dataset.other}));
+ const shares=decks.map((d,idx)=>d.isOther?+(document.getElementById('other-share').value)/100:+(deckBody.rows[idx].querySelector('.share-input').value)/100);
+ const m=getProbs();const hist=[shares.slice()];
+ let cur=shares.slice();for(let r=0;r<rounds;r++){cur=once(cur,m);hist.push(cur.slice());}
+ renderResults(decks,cur,hist,scoring(decks));
+}
+/*********** scoring ***********/
+function scoring(decks){
+ const n=decks.length,arr=[];
+ for(let i=0;i<n;i++){
+   if(decks[i].isOther){arr.push(null);continue;}
+   let s=0;for(let j=0;j<n;j++)if(i!==j&&!decks[j].isOther)s+=SCORE[cats[i][j]];
+   arr.push(s/(n-1));
+ }
+ return arr;
+}
+/*********** results & chart ***********/
+let bar=null;
+function renderResults(decks,final,hist,scores){
+ const res=document.getElementById('results');res.innerHTML='';
+ let tbl='<details open><summary>Share by Round</summary><table><thead><tr><th>Round</th>'+decks.map(d=>`<th>${d.name}</th>`).join('')+'</tr></thead><tbody>';
+ hist.forEach((row,i)=>{tbl+='<tr><th>'+i+'</th>'+row.map(v=>`<td>${(v*100).toFixed(1)}</td>`).join('')+'</tr>';});
+ tbl+='</tbody></table></details>';res.insertAdjacentHTML('beforeend',tbl);
+ const rank=final.map((v,i)=>[v,i]).filter(a=>!decks[a[1]].isOther).sort((a,b)=>b[0]-a[0]);
+ let rtbl='<h2>Winner Ranking</h2><table><thead><tr><th>#</th><th>Deck</th><th>Final %</th><th>Score</th></tr></thead><tbody>';
+ rank.forEach(([v,i],idx)=>{rtbl+=`<tr><td>${idx+1}</td><td>${decks[i].name}</td><td>${(v*100).toFixed(1)}</td><td>${scores[i].toFixed(1)}</td></tr>`;});
+ rtbl+='</tbody></table>';res.insertAdjacentHTML('beforeend',rtbl);
+ const ctx=document.createElement('canvas');res.appendChild(ctx);
+ if(bar)bar.destroy();
+ bar=new Chart(ctx,{type:'bar',data:{labels:rank.map(r=>decks[r[1]].name),datasets:[{label:'Final %',data:rank.map(r=>(r[0]*100).toFixed(1))}]},options:{plugins:{legend:{display:false}}}});
+}
+
+/*********** events ***********/
+modeSel.onchange=()=>limitShares();
+deckBody.addEventListener('input',e=>{if(e.target.classList.contains('share-input'))updateOthers();if(e.target.classList.contains('name-input'))buildMatrix();});
+deckBody.addEventListener('click',e=>{if(e.target.classList.contains('delete-btn')){const tr=e.target.closest('tr');if(tr.dataset.other)return;tr.remove();renumber();ensureOthers();}});
+document.getElementById('add-deck').onclick=()=>{
+ const oth=deckBody.querySelector('tr[data-other]');oth.insertAdjacentHTML('beforebegin',`<tr><td></td><td><input type="text" value="Deck ${deckBody.rows.length}" list="preset-names" class="name-input"></td><td><input type="number" value="0" class="share-input"></td><td><button class="delete-btn">✖</button></td></tr>`);renumber();limitShares();ensureOthers();
+};
+document.getElementById('simulate').onclick=simulate;
+
+/*********** init ***********/
+const dl=document.getElementById('preset-names');PRESETS.forEach(p=>{const o=document.createElement('option');o.value=p;dl.appendChild(o);});
+PRESETS.forEach(n=>createRow(n,0));
+ensureOthers();
+</script>
+</body>
+</html>
