@@ -137,10 +137,6 @@ function buildMatrix(){
    for(let j=0;j<n;j++){
      if(i===j){row+='<td>—</td>';continue;}
      if(j<i){row+=`<td class="mirror" data-i="${i}" data-j="${j}">${LABELS[cats[i][j]]}</td>`;}
-     else{
-       const disabled=(deckBody.rows[i].dataset.other||deckBody.rows[j].dataset.other)?'disabled':'';
-       row+=`<td><select data-i="${i}" data-j="${j}" ${disabled}>${Object.keys(LABELS).map(k=>`<option value="${k}">${LABELS[k]}</option>`).join('')}</select></td>`;
-     }
    }
    row+='</tr>';matrixTbl.insertAdjacentHTML('beforeend',row);
  }
