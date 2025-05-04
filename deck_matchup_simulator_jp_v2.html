@@ -3,204 +3,340 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Deck Match‑up Simulator</title>
+<title>Deck Match‑up Simulator (Team Win‑Rate Edition)</title>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-:root{--primary:#1a73e8;--surface:#fff;--surface-alt:#f1f3f4;--border:#e0e0e0;--success:#0b8043;--danger:#d93025;}
-*{box-sizing:border-box;font-family:Roboto,sans-serif;margin:0;padding:0;}
-body{background:var(--surface-alt);color:#202124;}
-.wrapper{max-width:1200px;margin:auto;padding:24px;}
-h1{font-size:1.6rem;font-weight:500;margin-bottom:20px;}
-h2{font-size:1.1rem;font-weight:500;margin-bottom:10px;}
-.card{background:var(--surface);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.12);padding:18px;margin-bottom:26px;}
-table{border-collapse:collapse;width:100%;font-size:.88rem;}
-th,td{border:1px solid var(--border);padding:6px 8px;text-align:center;}
-th{background:var(--surface-alt);white-space:nowrap;}
-input[type="number"],input[type="text"],select{width:100%;padding:6px;border:none;border-radius:4px;background:#f8f9fa;text-align:center;}
-input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{appearance:none;margin:0;}
-button{background:var(--primary);color:#fff;border:none;border-radius:4px;padding:8px 16px;cursor:pointer;font-weight:500;}
-button:hover{filter:brightness(1.05);}
-.flex{display:flex;gap:16px;flex-wrap:wrap;align-items:center;}
-.warn{background:#fce8e6;}
-.delete-btn{background:none;border:none;font-size:1rem;color:var(--danger);cursor:pointer;}
-details summary{cursor:pointer;font-weight:500;}
+:root{--p:#1a73e8;--s:#fff;--sa:#f1f3f4;--b:#e0e0e0;--ng:#d93025;}
+*{box-sizing:border-box;font-family:Roboto,sans-serif;margin:0;padding:0}
+body{background:var(--sa);color:#202124}
+.wrapper{max-width:1200px;margin:auto;padding:24px}
+.card{background:var(--s);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.12);padding:18px;margin-bottom:26px}
+h1{font-size:1.6rem;font-weight:500;margin-bottom:20px}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th,td{border:1px solid var(--b);padding:6px 8px;text-align:center}
+th{background:var(--sa);white-space:nowrap}
+input,select{width:100%;padding:6px;border:none;border-radius:4px;background:#f8f9fa;text-align:center}
+button{background:var(--p);color:#fff;border:none;border-radius:4px;padding:8px 16px;cursor:pointer;font-weight:500}
+button:hover{filter:brightness(1.05)}
+.flex{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+.delete-btn{background:none;border:none;color:var(--ng);cursor:pointer;font-size:1rem}
+.warn{background:#fce8e6}
 </style>
 </head>
 <body>
 <div class="wrapper">
-<h1>Deck Match‑up Simulator</h1>
+<h1>Deck Match‑up Simulator (Weighted Score + Team Win‑Rate)</h1>
 
-<!-- Controls -->
+<!-- Top controls -->
 <div class="card flex">
+  <label>Total Players <input id="players" type="number" value="100" min="1" style="width:6rem"></label>
   <label>Mode
-    <select id="mode-select"><option value="1">1‑on‑1</option><option value="3">3‑on‑3</option></select>
+    <select id="mode"><option value="1">1‑on‑1</option><option value="3">3‑on‑3</option></select>
   </label>
   <label>Rounds <input id="rounds" type="number" value="5" min="1" style="width:4rem"></label>
-  <button id="simulate">Simulate</button>
-  <button id="add-deck">＋ Add Deck</button>
+  <label>Risk λ <input id="lambda" type="range" min="0" max="2" step="0.1" value="1" style="width:120px"></label>
+  <span id="lambdaVal">1.0</span>
+  <button id="run">Simulate</button>
+  <button id="add">＋ Add Deck</button>
 </div>
 
-<!-- Deck table -->
+<!-- Deck share table -->
 <div class="card">
-  <h2>Deck & Initial Share</h2>
-  <table id="deck-table">
-    <thead><tr><th>#</th><th>Deck Name</th><th>Initial %</th><th></th></tr></thead>
-    <tbody></tbody>
-  </table>
+  <table id="deckT"><thead><tr><th>#</th><th>Deck</th><th>Initial %</th><th></th></tr></thead><tbody></tbody></table>
 </div>
 
-<!-- Matrix -->
+<!-- Match‑up matrix -->
 <div class="card">
-  <h2>Match‑up Matrix</h2>
-  <div style="overflow:auto"><table id="matrix-table"></table></div>
+  <div style="overflow-x:auto"><table id="matT"></table></div>
 </div>
 
-<!-- Results -->
-<div class="card" id="results"></div>
+<!-- Output area: scores, chart, best team suggestion -->
+<div class="card" id="out"></div>
+<div class="card" id="best"></div>
 </div>
-<datalist id="preset-names"></datalist>
+
+<datalist id="preset"></datalist>
 
 <script>
-/*** Constants ***/
-const PRESETS=["青紫ルフィ","緑紫ルフィ","紫ルフィ","黒0ルッチ","黒ティーチ","赤黄ベティ","赤ゾロ","赤シャンクス","赤緑スモーカー","緑ボニー","緑黄ロー","青黄ナミ","黄エネル"];
+// ------------------------------
+//  Parameters & constants
+// ------------------------------
+const PRESETS=["青紫ルフィ","緑紫ルフィ","紫ルフィ","黒ルッチ","黒ティーチ","赤黄ベティ","赤ゾロ","赤シャンクス","赤緑スモーカー","緑ボニー","緑黄ロー","青黄ナミ","黄エネル"];
 const LABELS={fav:"有利",sFav:"微有利",even:"五分",sUnfav:"微不利",unfav:"不利"};
 const REV={fav:"unfav",sFav:"sUnfav",even:"even",sUnfav:"sFav",unfav:"fav"};
-const MAP1={fav:0.6,sFav:0.55,even:0.5,sUnfav:0.45,unfav:0.4};
-const MAP3={fav:0.6,sFav:0.55,even:0.5,sUnfav:0.4,unfav:0.3};
-const SCORE={fav:20,sFav:10,even:0,sUnfav:-10,unfav:-20};
+//  Win‑prob mapping (heavier penalty to unfav)
+const MAP1={fav:.65,sFav:.57,even:.50,sUnfav:.43,unfav:.35};
+const MAP3={fav:.65,sFav:.57,even:.50,sUnfav:.40,unfav:.30};
+//  Score mapping (heavier negative weight for unfavourable)
+const SCORE={fav:20,sFav:10,even:0,sUnfav:-15,unfav:-25};
 
-/*** DOM refs ***/
-const deckBody=document.querySelector('#deck-table tbody');
-const matrix=document.getElementById('matrix-table');
-const modeSel=document.getElementById('mode-select');
+// ------------------------------
+//  DOM shortcuts
+// ------------------------------
+const dBody=document.querySelector('#deckT tbody');
+const mat=document.getElementById('matT');
+const mode=document.getElementById('mode');
+const lambdaSlider=document.getElementById('lambda');
+const lambdaVal=document.getElementById('lambdaVal');
 
-/*** Deck helpers ***/
+// ------------------------------
+//  Helper functions: Deck rows
+// ------------------------------
 function addRow(name="Deck",share=0){
-  deckBody.insertAdjacentHTML('beforeend',
-    `<tr><td></td><td><input list="preset-names" class="name-input" value="${name}"></td>
-      <td><input type="number" class="share-input" value="${share}" min="0"></td>
-      <td><button class="delete-btn">✖</button></td></tr>`);
+  dBody.insertAdjacentHTML('beforeend',`<tr><td></td><td><input list="preset" class="nm" value="${name}"></td><td><input type="number" class="sh" value="${share}" min="0"></td><td><button class="delete-btn">✖</button></td></tr>`);
   renumber();
 }
+function renumber(){[...dBody.rows].forEach((r,i)=>r.cells[0].textContent=i+1);}    
 function ensureOthers(){
-  let last=deckBody.lastElementChild;
-  if(!last||!last.dataset.other){
-    addRow("Others",0);
-    last=deckBody.lastElementChild;
-    last.dataset.other=1;
-    last.querySelector('.name-input').disabled=true;
-    const s=last.querySelector('.share-input');s.id="other-share";s.disabled=true;
+  let last=dBody.lastElementChild;
+  if(!last||!last.dataset.o){
+    addRow("Others",0);last=dBody.lastElementChild;
+    last.dataset.o=1;last.querySelector('.nm').disabled=true;
+    const s=last.querySelector('.sh');s.id="other";s.disabled=true;
     last.querySelector('.delete-btn').remove();
   }
-  limitShare();updateOthers();buildMatrix();
+  renumber();limitShare();updateOther();buildMatrix();
 }
-function renumber(){[...deckBody.rows].forEach((r,i)=>r.cells[0].textContent=i+1);}
-function limitShare(){
-  const max=modeSel.value==="3"?33.3:100;
-  deckBody.querySelectorAll('.share-input').forEach(i=>i.max=max);
-}
-function updateOthers(){
-  const sum=[...deckBody.rows].reduce((a,r)=>a+ +(r.dataset.other?0:r.querySelector('.share-input').value||0),0);
-  const o=document.getElementById('other-share');if(o){o.value=(100-sum).toFixed(1);o.parentElement.classList.toggle('warn',sum>100);}
+function limitShare(){const max=mode.value==="3"?33.3:100;dBody.querySelectorAll('.sh').forEach(i=>i.max=max);}    
+function updateOther(){
+  const total=[...dBody.rows].reduce((a,r)=>a+ +(r.dataset.o?0:r.querySelector('.sh').value||0),0);
+  const o=document.getElementById('other');if(o){o.value=(100-total).toFixed(1);o.parentElement.classList.toggle('warn',total>100);}  
 }
 
-/*** Matrix ***/
-let cat=[]; // category per cell
-function optionHTML(){return Object.keys(LABELS).map(k=>`<option value="${k}">${LABELS[k]}</option>`).join('');}
+// ------------------------------
+//  Match‑up matrix build
+// ------------------------------
+let cat=[],games=[];  // category matrix & sample counts
+function options(){return Object.keys(LABELS).map(k=>`<option value="${k}">${LABELS[k]}</option>`).join('');}
 function buildMatrix(){
-  const n=deckBody.rows.length;
-  if(!cat.length) cat=Array.from({length:n},()=>Array(n).fill("even"));  // 保持
-  matrix.innerHTML='';
-  const names=[...deckBody.rows].map(r=>r.cells[1].firstElementChild.value);
-  matrix.insertAdjacentHTML('beforeend','<tr><th></th>'+names.map(n=>`<th>${n}</th>`).join('')+'</tr>');
+  const n=dBody.rows.length;
+  cat=Array.from({length:n},(_,i)=>cat[i]??Array(n).fill("even"));
+  games=Array.from({length:n},(_,i)=>games[i]??Array(n).fill(10));
+  const heads=[...dBody.rows].map(r=>r.querySelector('.nm').value);
+  mat.innerHTML='<tr><th></th>'+heads.map(h=>`<th>${h}</th>`).join('')+'</tr>';
   for(let i=0;i<n;i++){
-    let row=`<tr><th>${names[i]}</th>`;
+    let row='<tr><th>'+heads[i]+'</th>';
     for(let j=0;j<n;j++){
       if(i===j){row+='<td>—</td>';continue;}
-      const val=cat[i]?.[j]||"even";
-      if(j<i){
-        row+=`<td class="mirror" data-i="${i}" data-j="${j}">${LABELS[val]}</td>`;
-      }else{
-        row+=`<td><select class="cat-select" data-i="${i}" data-j="${j}">${optionHTML()}</select></td>`;
+      row+=`<td><select class="cat" data-i="${i}" data-j="${j}">${options()}</select><br><input class="g" type="number" min="1" value="${games[i][j]}" data-i="${i}" data-j="${j}" style="width:4rem"></td>`;
+    }
+    row+='</tr>';mat.insertAdjacentHTML('beforeend',row);
+  }
+  //  sync selects
+  mat.querySelectorAll('select.cat').forEach(sel=>{
+    sel.value=cat[sel.dataset.i][sel.dataset.j];
+    sel.onchange=()=>{const i=+sel.dataset.i,j=+sel.dataset.j;cat[i][j]=sel.value;cat[j][i]=REV[sel.value];mat.querySelector(`select[data-i='${j}'][data-j='${i}']`).value=REV[sel.value];};
+  });
+  //  sample count mirror
+  mat.querySelectorAll('input.g').forEach(inp=>{inp.oninput=()=>{const i=+inp.dataset.i,j=+inp.dataset.j;games[i][j]=games[j][i]=+inp.value||1;}});
+}
+
+// ------------------------------
+//  Wilson lower bound util
+// ------------------------------
+function wilsonLower(p,n,z){
+  if(n===0) return p;  // guard
+  const d=1+z*z/n;
+  const centre=(p+z*z/(2*n))/d;
+  const h=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/d;
+  return Math.max(0,centre-h);
+}
+
+// ------------------------------
+//  Probability matrix based on categories
+// ------------------------------
+function pVal(catKey){return (mode.value==="3"?MAP3:MAP1)[catKey];}
+function probMatrix(){
+  const n=dBody.rows.length,pm=Array.from({length:n},()=>Array(n).fill(.5));
+  for(let i=0;i<n;i++)for(let j=0;j<n;j++)if(i!==j)pm[i][j]=pVal(cat[i][j]);
+  return pm;
+}
+
+// ------------------------------
+//  Evolution of shares after each Swiss round (for score chart)
+// ------------------------------
+function oneRound(sh,pm){
+  const n=sh.length,nx=Array(n).fill(0);
+  for(let i=0;i<n;i++){
+    let e=0;for(let j=0;j<n;j++)e+=sh[j]*pm[i][j];
+    nx[i]=sh[i]*e*n;
+  }
+  const s=nx.reduce((a,b)=>a+b,0);
+  return nx.map(x=>x/s);
+}
+
+// ------------------------------
+//  Weighted score (legacy)
+// ------------------------------
+function weightedScore(sh){
+  const n=dBody.rows.length,res=[];
+  for(let i=0;i<n;i++){
+    if(dBody.rows[i].dataset.o){res.push(null);continue;}
+    let s=0;
+    for(let j=0;j<n;j++)if(i!==j&&!dBody.rows[j].dataset.o)s+=sh[j]*SCORE[cat[i][j]];
+    res.push(s);
+  }
+  return res;
+}
+
+// ------------------------------
+//  Team win‑rate calculation
+// ------------------------------
+function teamWinRate(sh,pm){
+  //  Conservative p_i using Wilson lower bound (λ slider controls z multiple)
+  const λ=parseFloat(lambdaSlider.value);
+  const z=1.96*λ;
+  const nDeck=dBody.rows.length;
+  const pMeta=[];
+  for(let i=0;i<nDeck;i++){
+    if(dBody.rows[i].dataset.o){pMeta.push(null);continue;}
+    let p=0;
+    for(let j=0;j<nDeck;j++){
+      const pRaw=pm[i][j];
+      const n=games[i][j]||1;
+      const pLow=wilsonLower(pRaw,n,z);
+      p+=pLow*sh[j];
+    }
+    pMeta.push(p);
+  }
+  //  Enumerate all 3‑deck combos (excluding Others & duplicates)
+  const idx=[...Array(nDeck).keys()].filter(i=>!dBody.rows[i].dataset.o);
+  let best=null,bestP=0;
+  const combos=[];
+  for(let a=0;a<idx.length-2;a++){
+    for(let b=a+1;b<idx.length-1;b++){
+      for(let c=b+1;c<idx.length;c++){
+        const i=idx[a],j=idx[b],k=idx[c];
+        const p1=pMeta[i],p2=pMeta[j],p3=pMeta[k];
+        const pTeam=p1*p2 + p1*p3 + p2*p3 - 2*p1*p2*p3; // independence approx
+        combos.push({team:[i,j,k],p:pTeam});
+        if(pTeam>bestP){bestP=pTeam;best=[i,j,k];}
       }
     }
-    row+='</tr>';matrix.insertAdjacentHTML('beforeend',row);
   }
-  /*** セレクトの値セット & 同期 ***/
-  matrix.querySelectorAll('select.cat-select').forEach(sel=>{
-    const i=+sel.dataset.i,j=+sel.dataset.j;
-    sel.value=cat[i][j];
-    sel.onchange=()=>{cat[i][j]=sel.value;cat[j][i]=REV[sel.value];
-      const mir=matrix.querySelector(`td.mirror[data-i='${j}'][data-j='${i}']`);if(mir)mir.textContent=LABELS[REV[sel.value]];
-    };
-  });
-}
-/*** Name header update (軽量) ***/
-function updateMatrixHeader(){
-  const names=[...deckBody.rows].map(r=>r.cells[1].firstElementChild.value);
-  matrix.querySelectorAll('tr:first-child th').forEach((th,i)=>{if(i)th.textContent=names[i-1];});
-  matrix.querySelectorAll('tr:not(:first-child) th').forEach((th,i)=>th.textContent=names[i]);
+  combos.sort((x,y)=>y.p-x.p);
+  return {best,bestP,top5:combos.slice(0,5),pMeta};
 }
 
-/*** Simulation ***/
-function p(catKey){return (modeSel.value==="3"?MAP3:MAP1)[catKey];}
-function probMatrix(){
-  const n=deckBody.rows.length,m=Array.from({length:n},()=>Array(n).fill(.5));
-  for(let i=0;i<n;i++)for(let j=0;j<n;j++)if(i!==j)m[i][j]=p(cat[i][j]);
-  return m;
+// ------------------------------
+//  Monte Carlo CI for individual scores (optional)
+//  (kept from original but not essential for team calc)
+// ------------------------------
+function wilson(p,n){const z=1.96;const d=1+z*z/n;const c=(p+z*z/(2*n))/d;const h=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/d;return[c-h,c+h];}
+function mcCI(iter=400){
+  const n=dBody.rows.length,low=Array(n).fill(null),hi=Array(n).fill(null);
+  const dist=Array.from({length:n},()=>[]);
+  for(let k=0;k<iter;k++){
+    const sm=Array.from({length:n},()=>Array(n).fill(.5));
+    for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
+      const p0=pVal(cat[i][j]),g=games[i][j],w=Math.round(p0*g);
+      const [l,u]=wilson(p0,g);const s=Math.random()*(u-l)+l;
+      sm[i][j]=s;sm[j][i]=1-s;
+    }
+    const sc=weightedScore(Array(n).fill(1/n));
+    sc.forEach((v,i)=>{if(v!==null)dist[i].push(v);});
+  }
+  dist.forEach((arr,i)=>{if(arr.length){arr.sort((a,b)=>a-b);low[i]=arr[Math.floor(arr.length*.025)];hi[i]=arr[Math.floor(arr.length*.975)];}});
+  return [low,hi];
 }
-function once(sh,m){
-  const n=sh.length,nx=Array(n).fill(0);
-  for(let i=0;i<n;i++){let e=0;for(let j=0;j<n;j++)e+=sh[j]*m[i][j];nx[i]=sh[i]*e*n;}
-  const s=nx.reduce((a,b)=>a+b,0);return nx.map(x=>x/s);
-}
-function simulate(){
-  updateOthers();
+
+// ------------------------------
+//  Main "Simulate" handler
+// ------------------------------
+let chart=null;
+document.getElementById('run').onclick=()=>{
+  //  housekeeping
+  updateOther();
   const rounds=+document.getElementById('rounds').value;
-  const decks=[...deckBody.rows].map(r=>({name:r.cells[1].firstElementChild.value,isOther:r.dataset.other}));
-  let shares=decks.map((d,i)=>d.isOther?document.getElementById('other-share').value/100:+deckBody.rows[i].querySelector('.share-input').value/100);
-  const m=probMatrix(),hist=[shares.slice()];
-  for(let r=0;r<rounds;r++){shares=once(shares,m);hist.push(shares.slice());}
-  results(decks,shares,hist);
-}
+  lambdaVal.textContent=lambdaSlider.value;
 
-/*** Results ***/
-let chart;
-function results(decks,final,hist){
-  const res=document.getElementById('results');res.innerHTML='';
-  const names=decks.map(d=>d.name);
-  /* share table */
-  let t='<details open><summary>Share by Round</summary><table><thead><tr><th>R</th>'+names.map(n=>`<th>${n}</th>`).join('')+'</tr></thead><tbody>';
-  hist.forEach((row,i)=>{t+='<tr><th>'+i+'</th>'+row.map(v=>`<td>${(v*100).toFixed(1)}</td>`).join('')+'</tr>';});
-  t+='</tbody></table></details>';res.innerHTML=t;
-  /* bar chart */
-  const cvs=document.createElement('canvas');res.appendChild(cvs);
-  if(chart)chart.destroy();
-  chart=new Chart(cvs,{type:'bar',data:{labels:names,datasets:[{data:final.map(v=>(v*100).toFixed(1)),label:'Final %'}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:100}}}});
-}
+  const decks=[...dBody.rows].map(r=>({name:r.querySelector('.nm').value,isO:r.dataset.o}));
+  let sh=decks.map((d,i)=>d.isO?document.getElementById('other').value/100:+dBody.rows[i].querySelector('.sh').value/100);
 
-/*** Events ***/
-modeSel.onchange=limitShare;
-deckBody.addEventListener('input',e=>{
-  if(e.target.classList.contains('share-input'))updateOthers();
-  if(e.target.classList.contains('name-input'))updateMatrixHeader();
-});
-deckBody.addEventListener('click',e=>{
-  if(e.target.classList.contains('delete-btn')){
-    const tr=e.target.closest('tr');if(tr.dataset.other)return;
-    tr.remove();renumber();ensureOthers();
+  const pm=probMatrix();
+  const hist=[sh.slice()];
+  for(let r=0;r<rounds;r++){sh=oneRound(sh,pm);hist.push(sh.slice());}
+
+  //  Legacy exp & adj scores (kept for reference)
+  const expScore=weightedScore(sh);
+  const [lo,hi]=mcCI(300);
+  const λ=parseFloat(lambdaSlider.value);
+  const adjScore=expScore.map((s,i)=>s===null?null:s-λ*(hi[i]-lo[i]));
+
+  //  --- Team win‑rate section ---
+  const {best,bestP,top5,pMeta}=teamWinRate(sh,pm);
+
+  //  Output table & chart
+  const out=document.getElementById('out');out.innerHTML='';
+  let tbl='<table><thead><tr><th>Deck</th><th>Share %</th><th>ExpScore</th><th>AdjScore</th><th>p_vs_meta (Wilson‑low)</th></tr></thead><tbody>';
+  decks.forEach((d,i)=>{
+    if(d.isO) return;
+    tbl+=`<tr><td>${d.name}</td><td>${(sh[i]*100).toFixed(1)}</td><td>${expScore[i].toFixed(1)}</td><td>${adjScore[i].toFixed(1)}</td><td>${(pMeta[i]*100).toFixed(1)}%</td></tr>`;
+  });
+  tbl+='</tbody></table>';
+  out.innerHTML=tbl;
+
+  //  Chart
+  const cvs=document.createElement('canvas');out.appendChild(cvs);
+  const labels=decks.filter(d=>!d.isO).map(d=>d.name);
+  const shareData=sh.filter((_,i)=>!decks[i].isO).map(v=>+(v*100).toFixed(1));
+  const scoreData=adjScore.filter(x=>x!==null).map(v=>+v.toFixed(1));
+  if(chart) chart.destroy();
+  chart=new Chart(cvs,{type:'bar',data:{labels,datasets:[{label:'Share %',data:shareData,yAxisID:'y'},{label:'Adj Score',data:scoreData,type:'line',borderColor:'#d93025',yAxisID:'y1',tension:.3}]},
+    options:{plugins:{legend:{position:'top'}},interaction:{mode:'index'},scales:{y:{beginAtZero:true,max:100,title:{text:'Share %',display:true}},y1:{beginAtZero:true,title:{text:'Adj Score',display:true},position:'right',grid:{drawOnChartArea:false}}}}});
+
+  //  Best team suggestion
+  const bestDiv=document.getElementById('best');
+  if(best){
+    const [a,b,c]=best.map(i=>decks[i].name);
+    let html=`<h3>🪄 Best Team Suggestion</h3><p><strong>${a} / ${b} / ${c}</strong><br>Estimated team win‑rate: <strong>${(bestP*100).toFixed(1)}%</strong></p>`;
+    //  Show a small table with top5
+    html+='<table style="margin-top:12px"><thead><tr><th>Rank</th><th>Team</th><th>Win‑Rate</th></tr></thead><tbody>';
+    top5.forEach((t,idx)=>{
+      const names=t.team.map(i=>decks[i].name).join(' / ');
+      html+=`<tr><td>${idx+1}</td><td>${names}</td><td>${(t.p*100).toFixed(1)}%</td></tr>`;
+    });
+    html+='</tbody></table>';
+    bestDiv.innerHTML=html;
+  } else {
+    bestDiv.innerHTML='<p>No valid team combination found.</p>';
+  }
+};
+
+// ------------------------------
+//  Events: add/delete rows & misc
+// ------------------------------
+document.getElementById('add').onclick=()=>{
+  const others=dBody.querySelector('tr[data-o]');
+  others.insertAdjacentHTML('beforebegin',`<tr><td></td><td><input list="preset" class="nm" value="Deck ${dBody.rows.length}"></td><td><input type="number" class="sh" value="0"></td><td><button class="delete-btn">✖</button></td></tr>`);
+  renumber();limitShare();updateOther();buildMatrix();
+};
+
+dBody.addEventListener('input',e=>{
+  if(e.target.classList.contains('sh')) updateOther();
+  if(e.target.classList.contains('nm')){
+    const heads=[...dBody.rows].map(r=>r.querySelector('.nm').value);
+    mat.querySelectorAll('tr:first-child th').forEach((th,i)=>{if(i) th.textContent=heads[i-1];});
   }
 });
-document.getElementById('add-deck').onclick=()=>{
-  const oth=deckBody.querySelector('tr[data-other]');
-  oth.insertAdjacentHTML('beforebegin',`<tr><td></td><td><input list="preset-names" class="name-input" value="Deck ${deckBody.rows.length}"></td><td><input type="number" class="share-input" value="0"></td><td><button class="delete-btn">✖</button></td></tr>`);
-  renumber();limitShare();updateOthers();updateMatrixHeader();
-};
-document.getElementById('simulate').onclick=simulate;
 
-/*** Init ***/
-PRESETS.forEach(p=>{const o=document.createElement('option');o.value=p;document.getElementById('preset-names').appendChild(o);});
+dBody.addEventListener('click',e=>{
+  if(e.target.classList.contains('delete-btn')){
+    const tr=e.target.closest('tr');
+    if(tr.dataset.o) return; // can't delete Others row
+    tr.remove();
+    renumber();ensureOthers();
+  }
+});
+
+mode.onchange=limitShare;
+lambdaSlider.oninput=()=>lambdaVal.textContent=lambdaSlider.value;
+
+// ------------------------------
+//  Initial setup
+// ------------------------------
+PRESETS.forEach(p=>{const o=document.createElement('option');o.value=p;document.getElementById('preset').appendChild(o);});
 PRESETS.forEach(n=>addRow(n,0));
 ensureOthers();
 </script>
